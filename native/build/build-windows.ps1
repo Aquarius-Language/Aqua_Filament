@@ -5,7 +5,9 @@ $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $build = Join-Path $root "native\build\msvc"
 cmake -S (Join-Path $root "native") -B $build -G $Generator -A x64 "-DFILAMENT_DIR=$FilamentDir"
+if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed ($LASTEXITCODE)" }
 cmake --build $build --config Release
+if ($LASTEXITCODE -ne 0) { throw "Native runtime build failed ($LASTEXITCODE)" }
 # Ship the VC++ runtime next to the DLL so applications need no separate redistributable installer.
 $redist = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
 if ($redist) {

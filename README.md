@@ -1,4 +1,4 @@
-# Aqua_Filament 1.0.0 — 星泉 Filament 即時算繪函式庫
+# Aqua_Filament 1.0.1 — 星泉 Filament 即時算繪函式庫
 
 用 [AquariusLang 星泉](https://github.com/Aquarius-Language/AquariusLangTW) 驅動 Google
 [Filament 1.78.0](https://github.com/google/filament) 實體算繪（PBR）引擎的第三方 Bottle 函式庫。
@@ -26,7 +26,7 @@ every platform.
 # 你的 aqua.toml / your project's aqua.toml
 [dependencies]
 Aqua_Filament = { path = "../Aqua_Filament", version = ">= 1.0.0, < 2.0.0" }
-# or: aqua bottle install https://github.com/OWNER/Aqua_Filament.git --rev v1.0.0 --version "1.0.0" --project .
+# or: aqua bottle install https://github.com/OWNER/Aqua_Filament.git --rev v1.0.1 --version "1.0.1" --project .
 ```
 
 ```aquarius
@@ -212,9 +212,11 @@ the module is pinned in memory so the host can safely unload the library. Asset 
 
 - `tests/smoke/`：建立場景、算繪 20 幀、截圖並印出 `AQUA_FILAMENT_SMOKE_OK`。
 - `tests/native_driver.py`：以與主機相同的 ABI 直接驅動原生函式庫。
+- `tests/verify_camera.py`：以像素驗證 Windows DPI 不感知主機的視野、置中與三種控制模式；需要 Pillow。
 
 已驗證：Linux（Xvfb＋Mesa llvmpipe）上的原生 `.so` 直接測試與完整星泉程式；Chromium（SwiftShader
-WebGL 2）上的網頁版。Windows DLL 已完成建置與連結檢查，但尚未在 Windows 實機上執行。
+WebGL 2）上的網頁版。Windows 1.0.1 已在 250% 顯示縮放下驗證固定、軌道與飛行相機。
+WGL 驅動執行緒與視窗執行緒使用相同 DPI 模式，避免只顯示視口一角。
 
 ## 授權 / License
 

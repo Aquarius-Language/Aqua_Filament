@@ -12,7 +12,7 @@ root="$(cd "$here/../.." && pwd)"
 out="$root/runtimes/linux"; obj="$here/obj-linux"; mkdir -p "$out" "$obj"
 CXX="${CXX:-clang++}"; CC="${CC:-clang}"
 inc=(-I"$FILAMENT_LINUX/include" -nostdinc++ -isystem "$LIBCXX/include/x86_64-unknown-linux-gnu/c++/v1" -isystem "$LIBCXX/include/c++/v1")
-flags=(-std=c++17 -O2 -fPIC -fvisibility=hidden -fvisibility-inlines-hidden -stdlib=libc++ -DNDEBUG -Wno-deprecated-declarations)
+flags=(-std=c++20 -O2 -fPIC -fvisibility=hidden -fvisibility-inlines-hidden -stdlib=libc++ -DNDEBUG -Wno-deprecated-declarations)
 for f in aqua_filament window_x11; do
   "$CXX" "${flags[@]}" "${inc[@]}" -c "$root/native/src/$f.cpp" -o "$obj/$f.o"
 done

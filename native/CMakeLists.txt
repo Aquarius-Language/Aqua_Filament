@@ -5,7 +5,7 @@
 # Linux: prefer native/build/build-linux.sh (Filament's Linux release is built with libc++).
 cmake_minimum_required(VERSION 3.20)
 project(aqua_filament LANGUAGES C CXX)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT FILAMENT_DIR)
   message(FATAL_ERROR "Set FILAMENT_DIR to the extracted official Filament 1.78.0 release")

@@ -3,7 +3,7 @@
 // the AquariusLang DynamicLibrary ES-module factory ABI 1 (`aqua_library_abi`, `aqua_create_library`).
 // `Filament` and `FILAMENT_WASM_BASE64` are provided by the bundle prologue (see web/build.mjs).
 
-const VERSION = '1.0.0', FILAMENT_VERSION = '1.78.0';
+const VERSION = '1.0.1', FILAMENT_VERSION = '1.78.0';
 const encoder = new TextEncoder(), decoder = new TextDecoder();
 const fail = message => { throw new Error(message); };
 const num = (o, k, d) => (o && o[k] !== undefined && o[k] !== null) ? (typeof o[k] === 'boolean' ? (o[k] ? 1 : 0) : (typeof o[k] === 'number' ? o[k] : fail(`Expected a number for '${k}' / 欄位必須是數字`))) : d;
@@ -211,7 +211,15 @@ class Runtime {
       }
       return {ok: true, results};
     } catch (e) {
-      return {ok: false, error: String(e?.message ?? e), index, op: cmds[index]?.op ?? '?', results};
+      // WebAssembly C++ exceptions are numeric pointers. Let the browser deliver
+      // a pending context-loss notification before choosing the diagnostic.
+      if (typeof e === 'number') await new Promise(resolve => setTimeout(resolve, 0));
+      const error = this.engine?.context?.isContextLost()
+        ? 'WebGL context lost. Reload the page to restart rendering. / WebGL 繪圖環境已中斷，請重新載入頁面。'
+        : typeof e === 'number'
+          ? `Filament browser graphics backend failed (native error ${e}). / Filament 瀏覽器繪圖後端執行失敗。`
+          : String(e?.message ?? e);
+      return {ok: false, error, index, op: cmds[index]?.op ?? '?', results};
     }
   }
 
@@ -278,7 +286,7 @@ class Runtime {
     this.canvas = canvas;
     if (c.title) document.title = c.title;
     // preserveDrawingBuffer keeps screenshots possible; pass {"preserveDrawingBuffer": false} to Open to opt out.
-    this.engine = Filament.Engine.create(canvas, {antialias: false, alpha: false, preserveDrawingBuffer: flag(c, 'preserveDrawingBuffer', true)});
+    this.engine = Filament.Engine.create(canvas, {antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: flag(c, 'preserveDrawingBuffer', true)});
     this.swapChain = this.engine.createSwapChain();
     this.renderer = this.engine.createRenderer();
     this.scene = this.engine.createScene();
@@ -337,7 +345,7 @@ class Runtime {
       [window, 'blur', () => push({type: 'focus', focused: false})],
       [window, 'focus', () => push({type: 'focus', focused: true})]
     ];
-    for (const [t, n, f] of this.listeners) t.addEventListener(n, f, {passive: n !== 'wheel'});
+    for (const [t, n, f] of this.listeners) t.addEventListener(n, f, {passive: !['wheel', 'keydown', 'contextmenu'].includes(n)});
   }
 
   resize(force = false) {
@@ -413,6 +421,7 @@ class Runtime {
 
   async frame(c) {
     await new Promise(r => requestAnimationFrame(r));
+    if (this.engine.context.isContextLost()) fail('WebGL context lost / WebGL 繪圖環境已中斷');
     const events = this.events; this.events = [];
     for (const e of events) this.handleInput(e);
     if (this.resize()) events.push({type: 'resize', width: this.width, height: this.height});
@@ -427,6 +436,7 @@ class Runtime {
     this.camera.lookAt(this.eye, this.target, this.up);
     this.updateLoading();
     this.renderer.render(this.swapChain, this.view);
+    if (this.engine.context.isContextLost()) fail('WebGL context lost / WebGL 繪圖環境已中斷');
     if (this.pendingShot) {
       this.pendingShot = false;
       const url = this.canvas.toDataURL('image/png');

@@ -1,4 +1,5 @@
 native/build/obj-*/
+native/build/msvc*/
 native/third_party/
 node_modules/
 .transfer/

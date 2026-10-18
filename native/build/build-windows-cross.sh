@@ -12,7 +12,7 @@ out="$root/runtimes/windows"; obj="$here/obj-windows"; mkdir -p "$out" "$obj"
 CL=(clang --driver-mode=cl --target=x86_64-pc-windows-msvc -fms-compatibility-version=19.44)
 inc=(/imsvc "$MSVC/include" /imsvc "$WINSDK/Include/$V/ucrt" /imsvc "$WINSDK/Include/$V/um" /imsvc "$WINSDK/Include/$V/shared"
      /I "$FILAMENT_WINDOWS/include")
-flags=(/nologo /std:c++17 /O2 /MD /EHsc /GS- /DNDEBUG /DWIN32 /D_WIN32_WINNT=0x0A00 /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS
+flags=(/nologo /std:c++20 /O2 /MD /EHsc /GS- /DNDEBUG /DWIN32 /D_WIN32_WINNT=0x0A00 /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS
        /Zc:__cplusplus /D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH "/D__builtin_verbose_trap(a,b)=__builtin_trap()" -Wno-deprecated-declarations -Wno-microsoft-include -Wno-unused-command-line-argument)
 for f in aqua_filament window_win32; do
   "${CL[@]}" "${flags[@]}" "${inc[@]}" /c "$root/native/src/$f.cpp" /Fo"$obj/$f.obj"

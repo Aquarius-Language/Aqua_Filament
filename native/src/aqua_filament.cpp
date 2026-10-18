@@ -91,6 +91,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <backend/platforms/PlatformWGL.h>
 #define AQUA_EXPORT extern "C" __declspec(dllexport)
 #else
 #include <dlfcn.h>
@@ -105,7 +106,24 @@ using Json = nlohmann::json;
 
 namespace aquafl {
 
-static constexpr const char* kVersion = "1.0.0";
+#if defined(_WIN32)
+// New threads inherit the host process's DPI mode, not the window thread's mode.
+// WGL must use the same physical pixels as our per-monitor-aware window; otherwise
+// Windows creates a smaller back buffer and only a corner of the viewport is shown.
+class DpiAwareWGLPlatform final : public backend::PlatformWGL {
+    backend::Driver* createDriver(void* sharedContext,
+            const backend::Platform::DriverConfig& config) override {
+        using SetDpiContext = DPI_AWARENESS_CONTEXT(WINAPI*)(DPI_AWARENESS_CONTEXT);
+        if (auto setContext = reinterpret_cast<SetDpiContext>(
+                GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetThreadDpiAwarenessContext"))) {
+            setContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+        return PlatformWGL::createDriver(sharedContext, config);
+    }
+};
+#endif
+
+static constexpr const char* kVersion = "1.0.1";
 static constexpr double kPi = 3.14159265358979323846;
 static constexpr const char* kFilamentVersion = "1.78.0";
 
@@ -534,7 +552,12 @@ private:
         // OpenGL is the default everywhere: it needs no extra runtime (vulkan-1.dll / libvulkan) and is the
         // backend validated by the showcase tests. {"backend":"vulkan"} opts into Vulkan.
         if (b == Engine::Backend::DEFAULT) b = Engine::Backend::OPENGL;
+#if defined(_WIN32)
+        if (b == Engine::Backend::OPENGL) mPlatform = std::make_unique<DpiAwareWGLPlatform>();
+        mEngine = Engine::Builder().backend(b).platform(mPlatform.get()).build();
+#else
         mEngine = Engine::Builder().backend(b).build();
+#endif
         if (!mEngine) {
             mWindow.reset();
             fail("Filament engine creation failed (GPU driver?) / Filament 引擎建立失敗");
@@ -2149,6 +2172,9 @@ private:
         mEngine->destroy(mSwapChain);
         Engine::destroy(&mEngine);
         mEngine = nullptr;
+#if defined(_WIN32)
+        mPlatform.reset();
+#endif
         mWindow.reset();
         mPendingEvents.clear();
     }
@@ -2170,6 +2196,9 @@ private:
     std::unique_ptr<NativeWindow> mWindow;
     std::vector<Json> mPendingEvents;
     Engine* mEngine = nullptr;
+#if defined(_WIN32)
+    std::unique_ptr<backend::Platform> mPlatform;
+#endif
     SwapChain* mSwapChain = nullptr;
     Renderer* mRenderer = nullptr;
     Scene* mScene = nullptr;

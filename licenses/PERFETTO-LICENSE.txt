@@ -1,0 +1,2 @@
+Perfetto tracing SDK (linked by Filament backend) — Copyright (C) Google LLC — Apache License 2.0 (identical text to FILAMENT-LICENSE.txt).
+https://github.com/google/perfetto

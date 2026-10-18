@@ -1,0 +1,37 @@
+// Screen-space refraction for solid transmissive objects (jelly, glass, liquids).
+material {
+    name : AquaRefraction,
+    shadingModel : lit,
+    refractionType : solid,
+    refractionMode : screenspace,
+    specularAntiAliasing : true,
+    parameters : [
+        { type : float3, name : baseColor },
+        { type : float,  name : roughness },
+        { type : float,  name : metallic },
+        { type : float,  name : clearCoat },
+        { type : float,  name : clearCoatRoughness },
+        { type : float3, name : absorption },
+        { type : float,  name : thickness },
+        { type : float,  name : ior },
+        { type : float,  name : transmission },
+        { type : float3, name : emissive },
+        { type : float,  name : emissiveIntensity }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = vec4(materialParams.baseColor, 1.0);
+        material.roughness = materialParams.roughness;
+        material.metallic = materialParams.metallic;
+        material.clearCoat = materialParams.clearCoat;
+        material.clearCoatRoughness = materialParams.clearCoatRoughness;
+        material.absorption = materialParams.absorption;
+        material.thickness = materialParams.thickness;
+        material.ior = materialParams.ior;
+        material.transmission = materialParams.transmission;
+        material.emissive = vec4(materialParams.emissive * materialParams.emissiveIntensity, 0.0);
+    }
+}

@@ -1,0 +1,11 @@
+manifest_version = 1
+[project]
+name = "FilamentSmoke"
+type = "executable"
+version = "1.0.0"
+entry = "main.aqua"
+sources = ["main.aqua"]
+platforms = ["windows", "linux", "web"]
+
+[dependencies]
+Aqua_Filament = { path = "../..", version = "1.0.0" }

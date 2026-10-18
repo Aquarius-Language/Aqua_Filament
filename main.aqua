@@ -1,0 +1,683 @@
+# Aqua_Filament 1.0.0 — Google Filament 1.78.0 for AquariusLang / 星泉 Filament 即時算繪函式庫
+# English and 繁體中文 names share the same function objects.
+# Windows / Linux: native DLL/SO with its own window and render thread.  Web: filament.js (WebGL 2).
+#
+#   變數 濾 = 匯入("/bottles/Aqua_Filament/main.aqua");
+#   濾.開啟視窗({"標題":"Hello Filament", "寬度":1280, "高度":720});
+#   變數 球 = 濾.加入球體(0.5d, 濾.標準材質({"基礎色":[1,0.3,0.1,1], "粗糙度":0.3}), {"位置":[0,0.5,0]});
+#   迴圈 (變數 i = 0; 濾.視窗開啟中(); i++) { 濾.繪製畫面(); }
+#   濾.關閉視窗();
+
+變數 Version = "1.0.0";
+變數 版本 = Version;
+變數 FilamentVersion = "1.78.0";
+變數 Filament版本 = FilamentVersion;
+
+變數 Dynamic = 匯入("DynamicLibrary");
+變數 JSON = 匯入("Serialization");
+變數 Arrays = 匯入("Array");
+變數 無值 = JSON.ParseJson("null");
+變數 Null = 無值;
+
+變數 Platform = Dynamic.Platform;
+變數 平台 = Platform;
+變數 LibraryFolder = 目前工作目錄;
+變數 函式庫目錄 = LibraryFolder;
+變數 RuntimeKeys = {"windows":"/runtimes/windows/aqua_filament.dll", "linux":"/runtimes/linux/libaqua_filament.so", "web":"/runtimes/web/aqua_filament.mjs"};
+變數 SupportedPlatforms = ["windows", "linux", "web"];
+變數 支援平台 = SupportedPlatforms;
+變數 IsSupported, 是否支援 = 函式() { 回傳 RuntimeKeys[Platform] != 無值; };
+
+# ---------------------------------------------------------------------------------------------
+# Internal state / 內部狀態
+# ---------------------------------------------------------------------------------------------
+變數 核心 = 無值;
+變數 已開啟 = 假;
+變數 視窗關閉要求 = 假;
+變數 佇列 = [];
+變數 下一個代碼 = 1;
+變數 變換表 = {};
+變數 按鍵狀態 = {};
+變數 本幀按下 = {};
+變數 本幀放開 = {};
+變數 滑鼠 = {"x":0, "y":0, "左鍵":假, "右鍵":假, "中鍵":假, "滾輪":0, "left":假, "right":假, "middle":假, "wheel":0};
+變數 上一幀 = {"events":[], "width":0, "height":0, "time":0.0d, "dt":0.0d, "fps":0.0d, "frame":0, "open":假};
+變數 最大批次 = 1500;
+
+變數 載入核心 = 函式() {
+    如果 (核心 == 無值) {
+        如果 (RuntimeKeys[Platform] == 無值) {
+            印出("[Aqua_Filament] 不支援此平台 / Unsupported platform:", Platform, "— Windows, Linux, Web");
+            Dynamic.Load({"unsupported":"Aqua_Filament supports windows, linux and web / 僅支援 Windows、Linux、網頁"});
+        }
+        核心 = Dynamic.Load(LibraryFolder + RuntimeKeys[Platform]);
+    }
+    回傳 核心;
+};
+
+# Sends text to the library's fl_fail export, which raises a host error and stops the program.
+變數 失敗 = 函式(訊息) {
+    印出("[Aqua_Filament] 錯誤 / Error:", 訊息);
+    變數 庫 = 載入核心();
+    庫.Call("fl_fail", 訊息);
+    回傳 無值;
+};
+
+變數 執行批次 = 函式(指令) {
+    變數 庫 = 載入核心();
+    變數 回應 = JSON.ParseJson(庫.Call("fl_call", JSON.Json({"cmds":指令})));
+    如果 (!回應["ok"]) {
+        變數 說明 = 回應["error"];
+        如果 (回應["op"] != 無值) { 說明 = 回應["op"] + ": " + 說明; }
+        失敗(說明);
+    }
+    回傳 回應["results"];
+};
+
+# Executes queued commands; returns the results array of the batch.
+變數 Flush, 送出 = 函式() {
+    如果 (長度(佇列) == 0) { 回傳 []; }
+    變數 指令 = 佇列;
+    佇列 = [];
+    回傳 執行批次(指令);
+};
+
+變數 排入 = 函式(指令) {
+    Arrays.Append(佇列, 指令);
+    如果 (長度(佇列) >= 最大批次) { 送出(); }
+    回傳 無值;
+};
+
+# Queues a command that produces a result, flushes and returns that result.
+變數 查詢 = 函式(指令) {
+    Arrays.Append(佇列, 指令);
+    變數 結果 = 送出();
+    回傳 結果[長度(結果) - 1];
+};
+
+變數 新代碼 = 函式() {
+    變數 代碼 = 下一個代碼;
+    下一個代碼++;
+    回傳 代碼;
+};
+
+變數 需要開啟 = 函式(名稱) {
+    如果 (!已開啟) { 失敗("Call Open / 開啟視窗 before " + 名稱); }
+    回傳 無值;
+};
+
+# ---------------------------------------------------------------------------------------------
+# Bilingual option keys / 雙語選項鍵
+# ---------------------------------------------------------------------------------------------
+變數 取值 = 函式(資料, 英文, 中文) {
+    如果 (資料 == 無值) { 回傳 無值; }
+    變數 值 = 資料[英文];
+    如果 (值 == 無值) { 值 = 資料[中文]; }
+    回傳 值;
+};
+
+# Copies recognised [English, 中文] keys into a new hash with English keys.
+變數 轉換 = 函式(資料, 對照表) {
+    變數 輸出 = {};
+    如果 (資料 == 無值) { 回傳 輸出; }
+    迴圈 (變數 i = 0; i < 長度(對照表); i++) {
+        變數 對 = 對照表[i];
+        變數 值 = 取值(資料, 對[0], 對[1]);
+        如果 (值 != 無值) { 輸出[對[0]] = 值; }
+    }
+    回傳 輸出;
+};
+
+變數 視窗鍵 = [["title","標題"],["width","寬度"],["height","高度"],["backend","後端"],["maxFps","最高幀率"],["headless","無視窗"],
+    ["visible","可見"],["resizable","可調整大小"],["fov","視野"],["near","近平面"],["far","遠平面"],["appRoot","應用程式根目錄"],
+    ["preserveDrawingBuffer","保留繪圖緩衝"]];
+變數 變換鍵 = [["position","位置"],["rotation","旋轉"],["scale","縮放"],["quaternion","四元數"],["matrix","矩陣"],
+    ["castShadows","投射陰影"],["receiveShadows","接收陰影"]];
+變數 光源鍵 = [["color","顏色"],["intensity","強度"],["position","位置"],["direction","方向"],["falloff","衰減距離"],
+    ["inner","內角"],["outer","外角"],["castShadows","投射陰影"],["unit","單位"],["enabled","啟用"],
+    ["sunAngularRadius","太陽角半徑"],["sunHaloSize","太陽光暈大小"],["sunHaloFalloff","太陽光暈衰減"]];
+變數 陰影鍵 = [["mapSize","貼圖尺寸"],["cascades","串接層數"],["constantBias","常數偏移"],["normalBias","法線偏移"],["far","遠距"],
+    ["stable","穩定"],["lispsm","LiSPSM"],["contactShadows","接觸陰影"],["blur","模糊"],["bulbRadius","燈泡半徑"]];
+變數 材質鍵 = [["baseColor","基礎色"],["metallic","金屬度"],["roughness","粗糙度"],["reflectance","反射率"],["clearCoat","清漆"],
+    ["clearCoatRoughness","清漆粗糙度"],["occlusion","遮蔽"],["normalScale","法線強度"],["emissive","自發光"],
+    ["emissiveIntensity","自發光強度"],["uvScale","UV縮放"],["baseColorMap","基礎色貼圖"],["normalMap","法線貼圖"],
+    ["ormMap","ORM貼圖"],["absorption","吸收"],["thickness","厚度"],["ior","折射率"],["transmission","穿透率"],
+    ["strength","強度"],["intensity","亮度"]];
+變數 子選項鍵 = [["enabled","啟用"],["strength","強度"],["levels","層數"],["threshold","閾值"],["highlight","高光"],["quality","品質"],
+    ["lensFlare","鏡頭光暈"],["starburst","星芒"],["blendMode","混合模式"],["radius","半徑"],["intensity","強度"],["power","次方"],
+    ["bentNormals","彎曲法線"],["contactShadows","接觸陰影"],["thickness","厚度"],["maxDistance","最大距離"],["bias","偏移"],
+    ["stride","步距"],["cocScale","模糊圈縮放"],["maxAperture","最大光圈"],["nativeResolution","原生解析度"],
+    ["focusDistance","對焦距離"],["distance","距離"],["density","密度"],["height","高度"],["heightFalloff","高度衰減"],
+    ["maximumOpacity","最大不透明度"],["color","顏色"],["fromIbl","取自環境光"],["inScatteringSize","內散射大小"],
+    ["inScatteringStart","內散射起點"],["midPoint","中點"],["roundness","圓度"],["feather","羽化"],["feedback","回饋"],
+    ["filterWidth","濾波寬度"],["sharpness","銳利度"],["upscaling","放大倍率"],["minScale","最小縮放"],["maxScale","最大縮放"],
+    ["penumbraScale","半影縮放"],["penumbraRatioScale","半影比例縮放"]];
+變數 畫面鍵 = [["postProcessing","後處理"],["antiAliasing","抗鋸齒"],["msaa","多重取樣"],["taa","時間抗鋸齒"],["bloom","泛光"],
+    ["ssao","環境遮蔽"],["ssr","螢幕空間反射"],["dof","景深"],["fog","霧"],["vignette","暈影"],["shadowType","陰影類型"],
+    ["softShadows","柔和陰影"],["shadows","陰影"],["screenSpaceRefraction","螢幕空間折射"],["dynamicResolution","動態解析度"],
+    ["renderQuality","算繪品質"],["toneMapper","色調映射"],["exposureBias","曝光補償"],["contrast","對比"],["saturation","飽和度"],
+    ["vibrance","自然飽和度"],["whiteBalance","白平衡"],["clearColor","清除色"]];
+變數 子選項名稱 = ["taa","bloom","ssao","ssr","dof","fog","vignette","softShadows","dynamicResolution"];
+變數 列舉值 = [["aces","ACES"],["filmic","電影"],["linear","線性"],["agx","AgX"],["neutral","中性"],["pcf","PCF"],["vsm","VSM"],
+    ["dpcf","DPCF"],["pcss","PCSS"],["fxaa","FXAA"],["none","無"],["low","低"],["medium","中"],["high","高"],["ultra","極高"],
+    ["orbit","軌道"],["map","地圖"],["fly","飛行"],["opengl","OpenGL"],["vulkan","Vulkan"],["default","預設"],["clamp","夾取"],
+    ["repeat","重複"],["nearest","最近"],["interpolate","內插"],["add","相加"],["lumen","流明"],["candela","燭光"],["lux","勒克斯"]];
+
+變數 字串庫 = 匯入("String");
+# Hashes serialize to JSON objects; this distinguishes option hashes from numbers, booleans and arrays.
+變數 是雜湊 = 函式(值) { 回傳 字串庫.StartsWith(JSON.Json(值), "{"); };
+
+變數 列舉 = 函式(值) {
+    迴圈 (變數 i = 0; i < 長度(列舉值); i++) {
+        如果 (值 == 列舉值[i][1]) { 回傳 列舉值[i][0]; }
+    }
+    回傳 值;
+};
+
+變數 轉換列舉 = 函式(資料, 名稱列表) {
+    迴圈 (變數 i = 0; i < 長度(名稱列表); i++) {
+        變數 值 = 資料[名稱列表[i]];
+        如果 (值 != 無值) { 資料[名稱列表[i]] = 列舉(值); }
+    }
+    回傳 資料;
+};
+
+變數 轉換材質參數 = 函式(參數) {
+    變數 輸出 = 轉換(參數, 材質鍵);
+    迴圈 (變數 i = 0; i < 3; i++) {
+        變數 名稱 = ["baseColorMap","normalMap","ormMap"][i];
+        變數 值 = 輸出[名稱];
+        如果 (值 != 無值) {
+            如果 (!是雜湊(值)) { 輸出[名稱] = {"texture":值}; }
+            否則如果 (值["texture"] == 無值) { 輸出[名稱] = TextureParam(值["紋理"], 值); }
+        }
+    }
+    回傳 輸出;
+};
+
+變數 加入變換 = 函式(指令, 變換) {
+    變數 t = 轉換(變換, 變換鍵);
+    迴圈 (變數 i = 0; i < 長度(變換鍵); i++) {
+        變數 鍵 = 變換鍵[i][0];
+        如果 (t[鍵] != 無值) { 指令[鍵] = t[鍵]; }
+    }
+    回傳 指令;
+};
+
+變數 記錄變換 = 函式(代碼, 變換) {
+    變數 t = 轉換(變換, 變換鍵);
+    變數 狀態 = {"position":[0,0,0], "rotation":[0,0,0], "scale":[1,1,1]};
+    如果 (t["position"] != 無值) { 狀態["position"] = t["position"]; }
+    如果 (t["rotation"] != 無值) { 狀態["rotation"] = t["rotation"]; }
+    如果 (t["scale"] != 無值) { 狀態["scale"] = t["scale"]; }
+    如果 (t["quaternion"] != 無值) { 狀態["quaternion"] = t["quaternion"]; }
+    變換表[代碼] = 狀態;
+    回傳 代碼;
+};
+
+# ---------------------------------------------------------------------------------------------
+# Window and frame loop / 視窗與畫面迴圈
+# ---------------------------------------------------------------------------------------------
+# options: title/標題, width/寬度, height/高度, backend/後端 ("default"|"opengl"|"vulkan"), maxFps/最高幀率,
+#          headless/無視窗, fov/視野, near/近平面, far/遠平面, appRoot/應用程式根目錄
+變數 Open, 開啟視窗 = 函式(選項) {
+    如果 (已開啟) { 失敗("Window is already open / 視窗已開啟"); }
+    變數 o = 轉換(選項, 視窗鍵);
+    o["op"] = "init";
+    o["backend"] = 列舉(o["backend"]);
+    變數 應用根 = o["appRoot"];
+    如果 (應用根 == 無值) {
+        應用根 = LibraryFolder;
+        變數 尾 = "/bottles/Aqua_Filament";
+        變數 長 = 長度(LibraryFolder);
+        如果 (長 >= 長度(尾)) {
+            如果 (字串庫.EndsWith(字串庫.Replace(LibraryFolder, 字串庫.FromCode(92), "/"), 尾)) { 應用根 = 字串庫.Slice(LibraryFolder, 0, 長 - 長度(尾)); }
+        }
+    }
+    o["appRoot"] = 應用根;
+    o["libraryKey"] = LibraryFolder + RuntimeKeys[Platform];
+    如果 (字串庫.StartsWith(o["libraryKey"], 應用根)) { o["libraryKey"] = 字串庫.Slice(o["libraryKey"], 長度(應用根), 長度(o["libraryKey"])); }
+    o["materials"] = LibraryFolder + "/materials";
+    變數 結果 = 查詢(o);
+    已開啟 = 真;
+    視窗關閉要求 = 假;
+    結果["寬度"] = 結果["width"];
+    結果["高度"] = 結果["height"];
+    結果["後端"] = 結果["backend"];
+    回傳 結果;
+};
+
+變數 IsOpen, 視窗開啟中 = 函式() { 回傳 已開啟 && !視窗關閉要求; };
+變數 CloseRequested, 要求關閉 = 函式() { 回傳 視窗關閉要求; };
+
+變數 處理事件 = 函式(事件列表) {
+    本幀按下 = {};
+    本幀放開 = {};
+    滑鼠["wheel"] = 0;
+    迴圈 (變數 i = 0; i < 長度(事件列表); i++) {
+        變數 e = 事件列表[i];
+        變數 類型 = e["type"];
+        如果 (類型 == "key") {
+            按鍵狀態[e["key"]] = e["down"];
+            如果 (e["down"]) { 本幀按下[e["key"]] = 真; } 否則 { 本幀放開[e["key"]] = 真; }
+        } 否則如果 (類型 == "mouse") {
+            滑鼠["x"] = e["x"];
+            滑鼠["y"] = e["y"];
+            如果 (e["action"] == "down" || e["action"] == "up") {
+                變數 按下 = e["action"] == "down";
+                如果 (e["button"] == 0) { 滑鼠["left"] = 按下; }
+                如果 (e["button"] == 1) { 滑鼠["right"] = 按下; }
+                如果 (e["button"] == 2) { 滑鼠["middle"] = 按下; }
+            }
+            如果 (e["action"] == "wheel") { 滑鼠["wheel"] = 滑鼠["wheel"] + e["delta"]; }
+        } 否則如果 (類型 == "close") {
+            視窗關閉要求 = 真;
+        }
+        e["類型"] = 類型;
+    }
+    滑鼠["左鍵"] = 滑鼠["left"];
+    滑鼠["右鍵"] = 滑鼠["right"];
+    滑鼠["中鍵"] = 滑鼠["middle"];
+    滑鼠["滾輪"] = 滑鼠["wheel"];
+    回傳 無值;
+};
+
+# Executes queued commands, renders one frame and returns
+# {events/事件, width/寬度, height/高度, time/時間, dt/間隔, fps/幀率, frame/幀數, open/開啟中, loading/載入中}.
+變數 Frame, 繪製畫面 = 函式() {
+    需要開啟("Frame / 繪製畫面");
+    Arrays.Append(佇列, {"op":"frame"});
+    變數 結果 = 送出();
+    變數 f = 結果[長度(結果) - 1];
+    處理事件(f["events"]);
+    如果 (!f["open"]) { 視窗關閉要求 = 真; }
+    f["事件"] = f["events"];
+    f["寬度"] = f["width"];
+    f["高度"] = f["height"];
+    f["時間"] = f["time"];
+    f["間隔"] = f["dt"];
+    f["幀率"] = f["fps"];
+    f["幀數"] = f["frame"];
+    f["開啟中"] = !視窗關閉要求;
+    f["載入中"] = f["loading"];
+    上一幀 = f;
+    回傳 f;
+};
+
+變數 LastFrame, 上一幀資訊 = 函式() { 回傳 上一幀; };
+變數 IsKeyDown, 按鍵按下中 = 函式(鍵) { 回傳 按鍵狀態[鍵] == 真; };
+變數 KeyPressed, 按鍵剛按下 = 函式(鍵) { 回傳 本幀按下[鍵] == 真; };
+變數 KeyReleased, 按鍵剛放開 = 函式(鍵) { 回傳 本幀放開[鍵] == 真; };
+變數 Mouse, 滑鼠狀態 = 函式() { 回傳 滑鼠; };
+
+變數 Close, 關閉視窗 = 函式() {
+    如果 (已開啟) {
+        排入({"op":"close"});
+        送出();
+        已開啟 = 假;
+        變換表 = {};
+    }
+    如果 (核心 != 無值) {
+        核心.Call("fl_shutdown", "{}");
+        核心.Dispose();
+        核心 = 無值;
+    }
+    回傳 無值;
+};
+
+變數 SetTitle, 設定標題 = 函式(文字) { 需要開啟("SetTitle / 設定標題"); 排入({"op":"title", "text":文字}); 回傳 無值; };
+變數 Info, 資訊 = 函式() { 回傳 查詢({"op":"info"}); };
+變數 Stats, 統計 = 函式() {
+    需要開啟("Stats / 統計");
+    變數 s = 查詢({"op":"stats"});
+    s["幀率"] = s["fps"]; s["物件數"] = s["objects"]; s["光源數"] = s["lights"]; s["模型數"] = s["models"];
+    回傳 s;
+};
+# Desktop: writes a PNG file. Web: keeps the PNG as a data URL (globalThis.__aquaFilamentScreenshot).
+變數 Screenshot, 截圖 = 函式(路徑) { 需要開啟("Screenshot / 截圖"); 回傳 查詢({"op":"screenshot", "path":路徑}); };
+
+# ---------------------------------------------------------------------------------------------
+# Camera / 相機
+# ---------------------------------------------------------------------------------------------
+變數 SetCamera, 設定相機 = 函式(眼睛, 目標, 上方) {
+    需要開啟("SetCamera / 設定相機");
+    排入({"op":"camera", "eye":眼睛, "target":目標, "up":上方});
+    回傳 無值;
+};
+變數 LookAt, 看向 = 函式(眼睛, 目標) { 回傳 設定相機(眼睛, 目標, [0, 1, 0]); };
+變數 SetLens, 設定鏡頭 = 函式(視野角度, 近平面, 遠平面) {
+    需要開啟("SetLens / 設定鏡頭");
+    排入({"op":"lens", "fov":視野角度, "near":近平面, "far":遠平面});
+    回傳 無值;
+};
+變數 SetExposure, 設定曝光 = 函式(光圈, 快門, 感光度) {
+    需要開啟("SetExposure / 設定曝光");
+    排入({"op":"exposure", "aperture":光圈, "shutter":快門, "iso":感光度});
+    回傳 無值;
+};
+變數 SetEV100, 設定曝光值 = 函式(曝光值) { 需要開啟("SetEV100 / 設定曝光值"); 排入({"op":"exposure", "ev100":曝光值}); 回傳 無值; };
+# options: target/目標, eye/眼睛, orbitSpeed/旋轉速度, zoomSpeed/縮放速度, speed/速度 (fly), panSpeed/平移速度, wheelScale/滾輪倍率
+變數 控制鍵 = [["target","目標"],["eye","眼睛"],["orbitSpeed","旋轉速度"],["zoomSpeed","縮放速度"],["speed","速度"],
+    ["panSpeed","平移速度"],["damping","阻尼"],["wheelScale","滾輪倍率"]];
+變數 相機控制 = 函式(模式, 選項) {
+    需要開啟("CameraControl / 相機控制");
+    變數 o = 轉換(選項, 控制鍵);
+    o["op"] = "cameraControl";
+    o["mode"] = 模式;
+    排入(o);
+    回傳 無值;
+};
+變數 OrbitControl, 軌道控制 = 函式(選項) { 回傳 相機控制("orbit", 選項); };
+變數 FlyControl, 飛行控制 = 函式(選項) { 回傳 相機控制("fly", 選項); };
+變數 MapControl, 地圖控制 = 函式(選項) { 回傳 相機控制("map", 選項); };
+變數 DisableCameraControl, 停用相機控制 = 函式() { 回傳 相機控制("none", {}); };
+變數 CameraState, 相機狀態 = 函式() {
+    需要開啟("CameraState / 相機狀態");
+    變數 s = 查詢({"op":"cameraState"});
+    s["眼睛"] = s["eye"]; s["目標"] = s["target"]; s["上方"] = s["up"]; s["視野"] = s["fov"];
+    回傳 s;
+};
+
+# ---------------------------------------------------------------------------------------------
+# View & post-processing / 畫面與後處理
+# ---------------------------------------------------------------------------------------------
+# SetView({"泛光":{"強度":0.1}, "環境遮蔽":真, "色調映射":"ACES", "陰影類型":"VSM", "景深":{"對焦距離":2}})
+變數 SetView, 設定畫面 = 函式(選項) {
+    需要開啟("SetView / 設定畫面");
+    變數 o = 轉換(選項, 畫面鍵);
+    迴圈 (變數 i = 0; i < 長度(子選項名稱); i++) {
+        變數 名稱 = 子選項名稱[i];
+        變數 值 = o[名稱];
+        如果 (值 != 無值) {
+            如果 (是雜湊(值)) { o[名稱] = 轉換列舉(轉換(值, 子選項鍵), ["quality","blendMode"]); }
+        }
+    }
+    轉換列舉(o, ["antiAliasing","shadowType","toneMapper","renderQuality"]);
+    o["op"] = "view";
+    排入(o);
+    回傳 無值;
+};
+變數 SetToneMapper, 設定色調映射 = 函式(名稱) { 回傳 設定畫面({"toneMapper":名稱}); };
+變數 SetShadowType, 設定陰影類型 = 函式(名稱) { 回傳 設定畫面({"shadowType":名稱}); };
+變數 SetBloom, 設定泛光 = 函式(強度) { 回傳 設定畫面({"bloom":{"enabled":強度 > 0, "strength":強度}}); };
+變數 SetClearColor, 設定清除色 = 函式(顏色) { 回傳 設定畫面({"clearColor":顏色}); };
+
+# ---------------------------------------------------------------------------------------------
+# Environment lighting / 環境光
+# ---------------------------------------------------------------------------------------------
+# iblPath / skyboxPath: KTX files generated by Filament's cmgen (…_ibl.ktx, …_skybox.ktx); skyboxPath may be 無值.
+變數 LoadEnvironment, 載入環境光 = 函式(環境光路徑, 天空盒路徑, 強度) {
+    需要開啟("LoadEnvironment / 載入環境光");
+    變數 o = {"op":"environment", "ibl":環境光路徑, "intensity":強度};
+    如果 (天空盒路徑 != 無值) { o["skybox"] = 天空盒路徑; }
+    排入(o);
+    送出();
+    回傳 無值;
+};
+變數 SetEnvironmentIntensity, 設定環境光強度 = 函式(強度) { 需要開啟("SetEnvironmentIntensity"); 排入({"op":"environment", "intensity":強度}); 回傳 無值; };
+變數 RotateEnvironment, 旋轉環境光 = 函式(角度) { 需要開啟("RotateEnvironment"); 排入({"op":"environment", "rotation":角度}); 回傳 無值; };
+變數 SetEnvironmentEnabled, 啟用環境光 = 函式(啟用) { 需要開啟("SetEnvironmentEnabled"); 排入({"op":"environment", "enabled":啟用}); 回傳 無值; };
+變數 SetSkyColor, 設定天空顏色 = 函式(顏色) { 需要開啟("SetSkyColor"); 排入({"op":"skybox", "color":顏色}); 回傳 無值; };
+變數 LoadSkybox, 載入天空盒 = 函式(路徑) { 需要開啟("LoadSkybox"); 排入({"op":"skybox", "path":路徑}); 送出(); 回傳 無值; };
+變數 ShowSkybox, 顯示天空盒 = 函式(顯示) { 需要開啟("ShowSkybox"); 排入({"op":"skybox", "visible":顯示}); 回傳 無值; };
+
+# ---------------------------------------------------------------------------------------------
+# Lights / 光源 (intensity: sun/directional in lux, point/spot in lumens)
+# ---------------------------------------------------------------------------------------------
+變數 建立光源 = 函式(類型, 參數) {
+    需要開啟("Light / 光源");
+    變數 代碼 = 新代碼();
+    變數 o = 轉換(參數, 光源鍵);
+    o["op"] = "light"; o["id"] = 代碼; o["type"] = 類型;
+    如果 (o["unit"] != 無值) { o["unit"] = 列舉(o["unit"]); }
+    變數 陰影 = 取值(參數, "shadow", "陰影");
+    如果 (陰影 != 無值) { o["shadow"] = 轉換(陰影, 陰影鍵); }
+    排入(o);
+    回傳 代碼;
+};
+變數 合併 = 函式(基本, 選項) {
+    如果 (選項 == 無值) { 回傳 基本; }
+    變數 o = 轉換(選項, 光源鍵);
+    迴圈 (變數 i = 0; i < 長度(光源鍵); i++) {
+        變數 鍵 = 光源鍵[i][0];
+        如果 (o[鍵] != 無值) { 基本[鍵] = o[鍵]; }
+    }
+    變數 陰影 = 取值(選項, "shadow", "陰影");
+    如果 (陰影 != 無值) { 基本["shadow"] = 陰影; }
+    回傳 基本;
+};
+變數 AddSun, 加入太陽光 = 函式(方向, 顏色, 強度, 選項) {
+    回傳 建立光源("sun", 合併({"direction":方向, "color":顏色, "intensity":強度, "castShadows":真}, 選項));
+};
+變數 AddDirectionalLight, 加入平行光 = 函式(方向, 顏色, 強度, 選項) {
+    回傳 建立光源("directional", 合併({"direction":方向, "color":顏色, "intensity":強度}, 選項));
+};
+變數 AddPointLight, 加入點光源 = 函式(位置, 顏色, 強度, 衰減距離, 選項) {
+    回傳 建立光源("point", 合併({"position":位置, "color":顏色, "intensity":強度, "falloff":衰減距離}, 選項));
+};
+變數 AddSpotLight, 加入聚光燈 = 函式(位置, 方向, 顏色, 強度, 外角, 衰減距離, 選項) {
+    回傳 建立光源("spot", 合併({"position":位置, "direction":方向, "color":顏色, "intensity":強度, "outer":外角,
+        "inner":外角 * 0.8d, "falloff":衰減距離}, 選項));
+};
+變數 SetLight, 設定光源 = 函式(光源, 選項) {
+    需要開啟("SetLight / 設定光源");
+    變數 o = 轉換(選項, 光源鍵);
+    o["op"] = "setLight"; o["id"] = 光源;
+    排入(o);
+    回傳 無值;
+};
+
+# ---------------------------------------------------------------------------------------------
+# Materials & textures / 材質與紋理
+# ---------------------------------------------------------------------------------------------
+# srgb: 真 for colour textures (base colour, emissive), 假 for data (normal, ORM). Supports .ktx2 / .ktx / .png / .jpg.
+變數 LoadTexture, 載入紋理 = 函式(路徑, srgb) {
+    需要開啟("LoadTexture / 載入紋理");
+    變數 代碼 = 新代碼();
+    排入({"op":"texture", "id":代碼, "path":路徑, "srgb":srgb});
+    回傳 代碼;
+};
+# Texture parameter with sampler options: wrap/包覆 ("repeat"|"clamp"), filter/濾波 ("linear"|"nearest").
+變數 TextureParam, 紋理參數 = 函式(紋理, 選項) {
+    變數 o = {"texture":紋理};
+    變數 包覆 = 取值(選項, "wrap", "包覆");
+    變數 濾波 = 取值(選項, "filter", "濾波");
+    如果 (包覆 != 無值) { o["wrap"] = 列舉(包覆); }
+    如果 (濾波 != 無值) { o["filter"] = 列舉(濾波); }
+    回傳 o;
+};
+# Loads a compiled Filament material (.filamat from matc); returns its id.
+變數 LoadMaterial, 載入材質 = 函式(路徑) {
+    需要開啟("LoadMaterial / 載入材質");
+    變數 代碼 = 新代碼();
+    排入({"op":"material", "id":代碼, "path":路徑});
+    回傳 代碼;
+};
+# material: built-in name ("lit","lit_transparent","refraction","shadow","unlit") or a LoadMaterial id.
+# Built-in parameter names are translated from 繁體中文; custom materials receive parameters unchanged.
+變數 CreateMaterialInstance, 建立材質實例 = 函式(材質, 參數) {
+    需要開啟("CreateMaterialInstance / 建立材質實例");
+    變數 代碼 = 新代碼();
+    變數 p = 參數;
+    變數 內建 = 材質 == "lit" || 材質 == "lit_transparent" || 材質 == "refraction" || 材質 == "shadow" || 材質 == "unlit";
+    如果 (內建) { p = 轉換材質參數(參數); }
+    如果 (p == 無值) { p = {}; }
+    排入({"op":"instance", "id":代碼, "material":材質, "params":p});
+    回傳 代碼;
+};
+變數 SetMaterialParams, 設定材質參數 = 函式(材質實例, 參數) {
+    需要開啟("SetMaterialParams / 設定材質參數");
+    排入({"op":"params", "id":材質實例, "params":轉換材質參數(參數)});
+    回傳 無值;
+};
+變數 SetCustomMaterialParams, 設定自訂材質參數 = 函式(材質實例, 參數) {
+    需要開啟("SetCustomMaterialParams"); 排入({"op":"params", "id":材質實例, "params":參數}); 回傳 無值;
+};
+# Standard PBR (metallic/roughness): 基礎色 baseColor, 金屬度 metallic, 粗糙度 roughness, 反射率 reflectance, 清漆 clearCoat,
+# 清漆粗糙度, 自發光 emissive, 自發光強度, 基礎色貼圖, 法線貼圖, ORM貼圖 (R=AO, G=roughness, B=metal), UV縮放, 遮蔽, 法線強度.
+變數 StandardMaterial, 標準材質 = 函式(參數) { 回傳 建立材質實例("lit", 參數); };
+變數 TransparentMaterial, 透明材質 = 函式(參數) { 回傳 建立材質實例("lit_transparent", 參數); };
+# Screen-space refraction: 基礎色, 粗糙度, 吸收 absorption, 厚度 thickness, 折射率 ior, 穿透率 transmission.
+變數 RefractiveMaterial, 折射材質 = 函式(參數) { 回傳 建立材質實例("refraction", 參數); };
+# Invisible ground that only shows shadows.
+變數 ShadowCatcher, 陰影接收材質 = 函式(強度) { 回傳 建立材質實例("shadow", {"strength":強度}); };
+# Unlit colour × 亮度 intensity (emissive bulbs and signs that bloom).
+變數 UnlitMaterial, 無光照材質 = 函式(參數) { 回傳 建立材質實例("unlit", 參數); };
+# Loads colour (sRGB), normal and ORM textures and returns a textured standard material.
+變數 TexturedMaterial, 貼圖材質 = 函式(基礎色路徑, 法線路徑, ORM路徑, 參數) {
+    變數 p = 轉換材質參數(參數);
+    如果 (基礎色路徑 != 無值) { p["baseColorMap"] = {"texture":載入紋理(基礎色路徑, 真)}; }
+    如果 (法線路徑 != 無值) { p["normalMap"] = {"texture":載入紋理(法線路徑, 假)}; }
+    如果 (ORM路徑 != 無值) {
+        p["ormMap"] = {"texture":載入紋理(ORM路徑, 假)};
+        如果 (p["metallic"] == 無值) { p["metallic"] = 1; }
+        如果 (p["roughness"] == 無值) { p["roughness"] = 1; }
+    }
+    回傳 建立材質實例("lit", p);
+};
+
+# ---------------------------------------------------------------------------------------------
+# Geometry & models / 幾何與模型
+# transform: position/位置, rotation/旋轉 (degrees), scale/縮放 (number or [x,y,z]), quaternion/四元數,
+#            castShadows/投射陰影, receiveShadows/接收陰影
+# ---------------------------------------------------------------------------------------------
+變數 建立形狀 = 函式(參數, 材質實例, 變換) {
+    需要開啟("Shape / 形狀");
+    變數 代碼 = 新代碼();
+    參數["op"] = "shape"; 參數["id"] = 代碼;
+    如果 (材質實例 != 無值) { 參數["material"] = 材質實例; }
+    加入變換(參數, 變換);
+    排入(參數);
+    回傳 記錄變換(代碼, 變換);
+};
+變數 AddBox, 加入方塊 = 函式(尺寸, 材質實例, 變換) { 回傳 建立形狀({"shape":"box", "size":尺寸}, 材質實例, 變換); };
+變數 AddSphere, 加入球體 = 函式(半徑, 材質實例, 變換) { 回傳 建立形狀({"shape":"sphere", "radius":半徑}, 材質實例, 變換); };
+變數 AddPlane, 加入平面 = 函式(寬度, 深度, 材質實例, 變換) { 回傳 建立形狀({"shape":"plane", "width":寬度, "depth":深度}, 材質實例, 變換); };
+變數 AddCylinder, 加入圓柱 = 函式(半徑, 高度, 材質實例, 變換) { 回傳 建立形狀({"shape":"cylinder", "radius":半徑, "height":高度}, 材質實例, 變換); };
+變數 AddCone, 加入圓錐 = 函式(半徑, 高度, 材質實例, 變換) { 回傳 建立形狀({"shape":"cone", "radius":半徑, "height":高度}, 材質實例, 變換); };
+變數 AddTorus, 加入圓環 = 函式(半徑, 管半徑, 材質實例, 變換) { 回傳 建立形狀({"shape":"torus", "radius":半徑, "tube":管半徑}, 材質實例, 變換); };
+# options: segments/分段, rings/環數, uvScale/UV縮放, uvTiles/UV重複, topRadius/頂部半徑 merged into the shape command.
+變數 形狀鍵 = [["segments","分段"],["rings","環數"],["uvScale","UV縮放"],["uvTiles","UV重複"],["topRadius","頂部半徑"],["sides","邊數"]];
+變數 AddShape, 加入形狀 = 函式(形狀, 參數, 材質實例, 變換) {
+    變數 p = 轉換(參數, [["size","尺寸"],["radius","半徑"],["height","高度"],["width","寬度"],["depth","深度"],["tube","管半徑"]]);
+    變數 額外 = 轉換(參數, 形狀鍵);
+    迴圈 (變數 i = 0; i < 長度(形狀鍵); i++) { 如果 (額外[形狀鍵[i][0]] != 無值) { p[形狀鍵[i][0]] = 額外[形狀鍵[i][0]]; } }
+    p["shape"] = 形狀;
+    回傳 建立形狀(p, 材質實例, 變換);
+};
+# Custom mesh: flat number arrays (positions xyz…, indices, optional normals and uvs; use 無值 to omit).
+變數 AddGeometry, 加入幾何 = 函式(位置陣列, 索引陣列, 法線陣列, UV陣列, 材質實例, 變換) {
+    需要開啟("AddGeometry / 加入幾何");
+    變數 代碼 = 新代碼();
+    變數 o = {"op":"geometry", "id":代碼, "positions":位置陣列, "indices":索引陣列};
+    如果 (法線陣列 != 無值) { o["normals"] = 法線陣列; }
+    如果 (UV陣列 != 無值) { o["uvs"] = UV陣列; }
+    如果 (材質實例 != 無值) { o["material"] = 材質實例; }
+    加入變換(o, 變換);
+    排入(o);
+    回傳 記錄變換(代碼, 變換);
+};
+# Filament .filamesh (from the filamesh tool).
+變數 LoadMesh, 載入網格 = 函式(路徑, 材質實例, 變換) {
+    需要開啟("LoadMesh / 載入網格");
+    變數 代碼 = 新代碼();
+    變數 o = {"op":"mesh", "id":代碼, "path":路徑};
+    如果 (材質實例 != 無值) { o["material"] = 材質實例; }
+    加入變換(o, 變換);
+    排入(o);
+    回傳 記錄變換(代碼, 變換);
+};
+變數 模型資訊中文 = 函式(資訊) {
+    資訊["代碼"] = 資訊["id"]; 資訊["最小"] = 資訊["min"]; 資訊["最大"] = 資訊["max"]; 資訊["中心"] = 資訊["center"];
+    資訊["尺寸"] = 資訊["size"]; 資訊["動畫"] = 資訊["animations"]; 資訊["材質"] = 資訊["materials"]; 資訊["載入中"] = 資訊["loading"];
+    回傳 資訊;
+};
+# glTF 2.0 (.gltf/.glb; KTX2/BasisU, meshopt, KHR lights/materials). options: transform keys,
+# wait/等待載入 (default 真: textures finish before returning), lights/載入光源 (default 真).
+# Returns info: id/代碼, min, max, center/中心, size/尺寸, animations/動畫, materials/材質.
+變數 LoadModel, 載入模型 = 函式(路徑, 選項) {
+    需要開啟("LoadModel / 載入模型");
+    變數 代碼 = 新代碼();
+    變數 o = {"op":"model", "id":代碼, "path":路徑};
+    加入變換(o, 選項);
+    變數 等待 = 取值(選項, "wait", "等待載入");
+    如果 (等待 != 無值) { o["wait"] = 等待; }
+    變數 光源 = 取值(選項, "lights", "載入光源");
+    如果 (光源 != 無值) { o["lights"] = 光源; }
+    變數 資訊 = 查詢(o);
+    記錄變換(代碼, 選項);
+    回傳 模型資訊中文(資訊);
+};
+變數 ModelInfo, 模型資訊 = 函式(模型) { 需要開啟("ModelInfo"); 回傳 模型資訊中文(查詢({"op":"modelInfo", "id":模型})); };
+# Applies glTF animation `index` (or every animation when index is 無值) at `seconds`.
+變數 Animate, 播放動畫 = 函式(模型, 秒數, 索引) {
+    需要開啟("Animate / 播放動畫");
+    變數 o = {"op":"animate", "id":模型, "time":秒數};
+    如果 (索引 != 無值) { o["animation"] = 索引; }
+    排入(o);
+    回傳 無值;
+};
+變數 SetModelEmissive, 設定模型自發光 = 函式(模型, 倍率) { 需要開啟("SetModelEmissive"); 排入({"op":"emissive", "id":模型, "scale":倍率}); 回傳 無值; };
+變數 AddGroup, 加入群組 = 函式(變換) {
+    需要開啟("AddGroup / 加入群組");
+    變數 代碼 = 新代碼();
+    排入(加入變換({"op":"group", "id":代碼}, 變換));
+    回傳 記錄變換(代碼, 變換);
+};
+
+# ---------------------------------------------------------------------------------------------
+# Transforms & object state / 變換與物件狀態
+# ---------------------------------------------------------------------------------------------
+變數 送出變換 = 函式(物件) {
+    變數 狀態 = 變換表[物件];
+    變數 o = {"op":"transform", "id":物件, "position":狀態["position"], "scale":狀態["scale"]};
+    如果 (狀態["quaternion"] != 無值) { o["quaternion"] = 狀態["quaternion"]; } 否則 { o["rotation"] = 狀態["rotation"]; }
+    排入(o);
+    回傳 無值;
+};
+變數 取得狀態 = 函式(物件) {
+    如果 (變換表[物件] == 無值) { 變換表[物件] = {"position":[0,0,0], "rotation":[0,0,0], "scale":[1,1,1]}; }
+    回傳 變換表[物件];
+};
+變數 SetTransform, 設定變換 = 函式(物件, 變換) {
+    需要開啟("SetTransform / 設定變換");
+    變數 t = 轉換(變換, 變換鍵);
+    如果 (t["matrix"] != 無值) { 排入({"op":"transform", "id":物件, "matrix":t["matrix"]}); 回傳 無值; }
+    變數 狀態 = 取得狀態(物件);
+    如果 (t["position"] != 無值) { 狀態["position"] = t["position"]; }
+    如果 (t["rotation"] != 無值) { 狀態["rotation"] = t["rotation"]; 狀態["quaternion"] = 無值; }
+    如果 (t["quaternion"] != 無值) { 狀態["quaternion"] = t["quaternion"]; }
+    如果 (t["scale"] != 無值) { 狀態["scale"] = t["scale"]; }
+    回傳 送出變換(物件);
+};
+變數 SetPosition, 設定位置 = 函式(物件, 位置) { 回傳 設定變換(物件, {"position":位置}); };
+變數 SetRotation, 設定旋轉 = 函式(物件, 角度) { 回傳 設定變換(物件, {"rotation":角度}); };
+變數 SetScale, 設定縮放 = 函式(物件, 縮放) { 回傳 設定變換(物件, {"scale":縮放}); };
+# Lights move with position/direction instead of a transform.
+變數 MoveLight, 移動光源 = 函式(光源, 位置, 方向) {
+    需要開啟("MoveLight / 移動光源");
+    變數 o = {"op":"transform", "id":光源};
+    如果 (位置 != 無值) { o["position"] = 位置; }
+    如果 (方向 != 無值) { o["direction"] = 方向; }
+    排入(o);
+    回傳 無值;
+};
+變數 SetParent, 設定父物件 = 函式(物件, 父物件) {
+    需要開啟("SetParent / 設定父物件");
+    變數 o = {"op":"parent", "id":物件};
+    如果 (父物件 != 無值) { o["parent"] = 父物件; }
+    排入(o);
+    回傳 無值;
+};
+變數 SetVisible, 設定可見 = 函式(物件, 可見) { 需要開啟("SetVisible"); 排入({"op":"visible", "id":物件, "visible":可見}); 回傳 無值; };
+變數 SetShadows, 設定陰影 = 函式(物件, 投射, 接收) { 需要開啟("SetShadows"); 排入({"op":"shadows", "id":物件, "cast":投射, "receive":接收}); 回傳 無值; };
+變數 ApplyMaterial, 套用材質 = 函式(物件, 材質實例) { 需要開啟("ApplyMaterial"); 排入({"op":"setMaterial", "id":物件, "material":材質實例}); 回傳 無值; };
+變數 Remove, 移除 = 函式(物件) { 需要開啟("Remove / 移除"); 排入({"op":"remove", "id":物件}); 變換表[物件] = 無值; 回傳 無值; };
+# Removes every object (and the environment unless keepEnvironment/保留環境 is 真); the window stays open.
+變數 ClearScene, 清除場景 = 函式(保留環境) {
+    需要開啟("ClearScene / 清除場景");
+    排入({"op":"clear", "keepEnvironment":保留環境});
+    送出();
+    變換表 = {};
+    回傳 無值;
+};

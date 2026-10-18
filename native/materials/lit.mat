@@ -1,0 +1,44 @@
+// Aqua_Filament standard metallic-roughness material.
+// Every texture is optional: the native/web runtime binds neutral 1x1 textures by default.
+material {
+    name : AquaLit,
+    shadingModel : lit,
+    requires : [ uv0 ],
+    specularAntiAliasing : true,
+    parameters : [
+        { type : float4, name : baseColor },
+        { type : float,  name : metallic },
+        { type : float,  name : roughness },
+        { type : float,  name : reflectance },
+        { type : float,  name : clearCoat },
+        { type : float,  name : clearCoatRoughness },
+        { type : float,  name : occlusion },
+        { type : float,  name : normalScale },
+        { type : float3, name : emissive },
+        { type : float,  name : emissiveIntensity },
+        { type : float2, name : uvScale },
+        { type : sampler2d, name : baseColorMap },
+        { type : sampler2d, name : normalMap },
+        { type : sampler2d, name : ormMap }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        highp vec2 uv = getUV0() * materialParams.uvScale;
+        vec3 n = texture(materialParams_normalMap, uv).xyz * 2.0 - 1.0;
+        n.xy *= materialParams.normalScale;
+        material.normal = normalize(n);
+        prepareMaterial(material);
+        vec4 albedo = texture(materialParams_baseColorMap, uv) * materialParams.baseColor;
+        vec3 orm = texture(materialParams_ormMap, uv).rgb;
+        material.baseColor = vec4(albedo.rgb, 1.0);
+        material.metallic = materialParams.metallic * orm.b;
+        material.roughness = materialParams.roughness * orm.g;
+        material.reflectance = materialParams.reflectance;
+        material.clearCoat = materialParams.clearCoat;
+        material.clearCoatRoughness = materialParams.clearCoatRoughness;
+        material.ambientOcclusion = mix(1.0, orm.r, materialParams.occlusion);
+        material.emissive = vec4(materialParams.emissive * materialParams.emissiveIntensity, 0.0);
+    }
+}

@@ -1,0 +1,28 @@
+manifest_version = 1
+[project]
+name = "Aqua_Filament"
+type = "library"
+version = "1.0.0"
+entry = "main.aqua"
+sources = ["main.aqua"]
+platforms = ["windows", "linux", "web"]
+license = "Apache-2.0"
+description = "English and 繁體中文 API for Google Filament 1.78.0 physically based rendering: native Windows/Linux windows and WebGL 2."
+
+[[assets]]
+source = "materials"
+
+[[assets]]
+source = "licenses"
+
+[[assets]]
+source = "runtimes/windows"
+platforms = ["windows"]
+
+[[assets]]
+source = "runtimes/linux"
+platforms = ["linux"]
+
+[[assets]]
+source = "runtimes/web"
+platforms = ["web"]

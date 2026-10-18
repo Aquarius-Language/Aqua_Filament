@@ -1,0 +1,4 @@
+{
+  global: aqua_library_abi; fl_call; fl_shutdown; fl_fail;
+  local: *;
+};

@@ -1,0 +1,7 @@
+native/build/obj-*/
+native/third_party/
+node_modules/
+.transfer/
+tests/**/dist/
+tests/**/*.png
+*.wasm

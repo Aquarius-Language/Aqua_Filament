@@ -1,0 +1,20 @@
+// Unlit colour / texture, multiplied by an intensity so bright bulbs and signs bloom.
+material {
+    name : AquaUnlit,
+    shadingModel : unlit,
+    requires : [ uv0 ],
+    parameters : [
+        { type : float4, name : baseColor },
+        { type : float,  name : intensity },
+        { type : float2, name : uvScale },
+        { type : sampler2d, name : baseColorMap }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        vec4 c = texture(materialParams_baseColorMap, getUV0() * materialParams.uvScale) * materialParams.baseColor;
+        material.baseColor = vec4(c.rgb * materialParams.intensity, c.a);
+    }
+}

@@ -1,0 +1,15 @@
+// Invisible ground that only darkens where shadows fall (shadow catcher).
+material {
+    name : AquaShadowCatcher,
+    blending : transparent,
+    shadingModel : unlit,
+    shadowMultiplier : true,
+    parameters : [ { type : float, name : strength } ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = vec4(0.0, 0.0, 0.0, materialParams.strength);
+    }
+}

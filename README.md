@@ -1,5 +1,7 @@
 # Aqua_Filament 1.0.1 — 星泉 Filament 即時算繪函式庫
 
+## !!目前尚不穩定!!
+
 用 [AquariusLang 星泉](https://github.com/Aquarius-Language/AquariusLangTW) 驅動 Google
 [Filament 1.78.0](https://github.com/google/filament) 實體算繪（PBR）引擎的第三方 Bottle 函式庫。
 每個函式都有 **繁體中文** 與 **English** 兩個名稱，兩者指向同一個函式物件。

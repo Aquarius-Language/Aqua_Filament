@@ -3,7 +3,7 @@
 // the AquariusLang DynamicLibrary ES-module factory ABI 1 (`aqua_library_abi`, `aqua_create_library`).
 // `Filament` and `FILAMENT_WASM_BASE64` are provided by the bundle prologue (see web/build.mjs).
 
-const VERSION = '1.0.1', FILAMENT_VERSION = '1.78.0';
+const VERSION = '1.0.2', FILAMENT_VERSION = '1.78.0';
 const encoder = new TextEncoder(), decoder = new TextDecoder();
 const fail = message => { throw new Error(message); };
 const num = (o, k, d) => (o && o[k] !== undefined && o[k] !== null) ? (typeof o[k] === 'boolean' ? (o[k] ? 1 : 0) : (typeof o[k] === 'number' ? o[k] : fail(`Expected a number for '${k}' / 欄位必須是數字`))) : d;
@@ -286,7 +286,11 @@ class Runtime {
     this.canvas = canvas;
     if (c.title) document.title = c.title;
     // preserveDrawingBuffer keeps screenshots possible; pass {"preserveDrawingBuffer": false} to Open to opt out.
-    this.engine = Filament.Engine.create(canvas, {antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: flag(c, 'preserveDrawingBuffer', true)});
+    const contextOptions = {antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: flag(c, 'preserveDrawingBuffer', true)};
+    const context = canvas.getContext('webgl2', contextOptions);
+    if (!context) { canvas.remove(); fail('WebGL 2 is unavailable / 無法建立 WebGL 2 繪圖環境'); }
+    prepareFilamentWebglContext(context);
+    this.engine = Filament.Engine.create(canvas, contextOptions);
     this.swapChain = this.engine.createSwapChain();
     this.renderer = this.engine.createRenderer();
     this.scene = this.engine.createScene();

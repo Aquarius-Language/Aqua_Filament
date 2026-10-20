@@ -1,4 +1,4 @@
-# Aqua_Filament 1.0.1 — Google Filament 1.78.0 for AquariusLang / 星泉 Filament 即時算繪函式庫
+# Aqua_Filament 1.0.2 — Google Filament 1.78.0 for AquariusLang / 星泉 Filament 即時算繪函式庫
 # English and 繁體中文 names share the same function objects.
 # Windows / Linux: native DLL/SO with its own window and render thread.  Web: filament.js (WebGL 2).
 #
@@ -8,7 +8,7 @@
 #   迴圈 (變數 i = 0; 濾.視窗開啟中(); i++) { 濾.繪製畫面(); }
 #   濾.關閉視窗();
 
-變數 Version = "1.0.1";
+變數 Version = "1.0.2";
 變數 版本 = Version;
 變數 FilamentVersion = "1.78.0";
 變數 Filament版本 = FilamentVersion;

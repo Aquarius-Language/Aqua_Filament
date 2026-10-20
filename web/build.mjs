@@ -9,6 +9,7 @@ const root = join(here, '..');
 const filamentDir = process.argv[2] || process.env.FILAMENT_WEB || join(root, 'native', 'third_party', 'filament-web');
 const js = readFileSync(join(filamentDir, 'filament.js'), 'utf8');
 const wasm = readFileSync(join(filamentDir, 'filament.wasm'));
+const compatibility = readFileSync(join(here, 'src', 'shader-compat.mjs'), 'utf8');
 const adapter = readFileSync(join(here, 'src', 'adapter.mjs'), 'utf8');
 // filament.js is classic (sloppy-mode) script code: evaluate it in its own function scope and expose an
 // initializer that rebinds the scope's `Filament` variable to the instantiated module, like Filament.init().
@@ -27,5 +28,5 @@ const FILAMENT_WASM_BASE64 = ${JSON.stringify(wasm.toString('base64'))};
 `;
 mkdirSync(join(root, 'runtimes', 'web'), {recursive: true});
 const out = join(root, 'runtimes', 'web', 'aqua_filament.mjs');
-writeFileSync(out, prologue + adapter);
-console.log(`Built ${out} (${(Buffer.byteLength(prologue + adapter) / 1048576).toFixed(1)} MiB)`);
+writeFileSync(out, prologue + compatibility + "\n" + adapter);
+console.log(`Built ${out} (${(Buffer.byteLength(prologue + compatibility + "\n" + adapter) / 1048576).toFixed(1)} MiB)`);

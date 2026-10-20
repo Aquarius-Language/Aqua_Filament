@@ -1,4 +1,4 @@
-# Aqua_Filament 1.0.1 — 星泉 Filament 即時算繪函式庫
+# Aqua_Filament 1.0.2 — 星泉 Filament 即時算繪函式庫
 
 ## !!目前尚不穩定!!
 
@@ -22,13 +22,39 @@ every platform.
 尚未支援的平台：**Android**，因為星泉的 Android 主機目前沒有把 `SurfaceView` 交給 `DynamicLibrary` 原生
 函式庫；**macOS**，因為需要 Apple SDK 建置 `.dylib`。在這兩個平台上呼叫 `開啟視窗` 會明確回報錯誤。
 
+## 1.0.2 WebGL 相容性修正 / WebGL compatibility fix
+
+網頁執行階段會自動避開 ANGLE Direct3D 11 的 uniform-buffer 資源槽越界問題。
+大型 uniform 陣列的最後一個元素改為同一 std140 區塊內的獨立欄位，所有索引讀取透過存取函式，
+保留資料偏移、陣列步幅、區塊大小與所有元素。這個修正在共用函式庫內，網頁匯出會自動包含它；
+不需要 Vulkan 啟動旗標或改動瀏覽器全域設定。
+
+The shared web runtime avoids ANGLE/D3D11's out-of-range structured-buffer resource binding.
+It splits off the last element of four large Filament uniform arrays without changing their std140
+buffer layout or contents. Direct3D and contexts without renderer details get the compatibility path;
+known Vulkan, Metal, OpenGL and SwiftShader contexts retain their existing optimizer path. No global
+WebGL prototype is changed. The native Windows/Linux binaries are unchanged.
+
+Existing locked projects must update their dependency to **Aqua_Filament >= 1.0.2** and run
+`aqua bottle update --project . --target web`, then rebuild the web export.
+
+```powershell
+node web/build.mjs
+node --test web/src/shader-compat.test.mjs
+node tests/web/verify-uniform-layout.mjs
+```
+
+The GPU regression compares all four original/patched uniform-buffer sizes and checks first,
+middle and last elements through 28 real pixel reads. It needs Playwright; set `AQUARIUS_PLAYWRIGHT`
+to its absolute `index.mjs` path if it is not in the adjacent Aquarius checkout.
+
 ## 安裝 / Install
 
 ```toml
 # 你的 aqua.toml / your project's aqua.toml
 [dependencies]
 Aqua_Filament = { path = "../Aqua_Filament", version = ">= 1.0.0, < 2.0.0" }
-# or: aqua bottle install https://github.com/OWNER/Aqua_Filament.git --rev v1.0.1 --version "1.0.1" --project .
+# or: aqua bottle install https://github.com/OWNER/Aqua_Filament.git --rev YOUR_COMMIT_OR_TAG --version "1.0.2" --project .
 ```
 
 ```aquarius

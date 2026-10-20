@@ -2,7 +2,7 @@ manifest_version = 1
 [project]
 name = "Aqua_Filament"
 type = "library"
-version = "1.0.1"
+version = "1.0.2"
 entry = "main.aqua"
 sources = ["main.aqua"]
 platforms = ["windows", "linux", "web"]

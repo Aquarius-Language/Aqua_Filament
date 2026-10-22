@@ -8,4 +8,4 @@ sources = ["main.aqua"]
 platforms = ["windows", "linux", "web"]
 
 [dependencies]
-Aqua_Filament = { path = "../..", version = "1.0.1" }
+Aqua_Filament = { path = "../..", version = "1.0.2" }
